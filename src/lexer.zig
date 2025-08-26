@@ -127,58 +127,62 @@ pub fn next(self: *Self) !?u8 {
 }
 
 pub fn data(self: *Self) !?u8 {
-    if (self.in_string == false) {
-        while (self.cur < self.content.len and isWhitespace(self.content[self.cur])) {
-            self.cur += 1;
-        }
-    }
+    if (self.cur >= self.content.len) return null;
 
-    brk: {
-        if (self.in_string == false) {
-            if (self.content[self.cur] == '"') {
-                self.in_string = true;
-                self.cur += 1;
-                break :brk;
-            } else {
-                var buffer: [256]u8 = .{0} ** 256;
-                var i: usize = 0;
-
-                while (self.cur < self.content.len and !isWhitespace(self.content[self.cur]) and self.content[self.cur] != ',') : ({
-                    self.cur += 1;
-                    i += 1;
-                }) {
-                    buffer[i] = self.content[self.cur];
-                }
-
-                // hex
-                if (startsWith(u8, buffer[0..i], "0x"))
-                    return try parseInt(u8, buffer[2..i], 16);
-
-                // binary
-                if (startsWith(u8, buffer[0..i], "0b"))
-                    return try parseInt(u8, buffer[2..i], 2);
-
-                // ints
-                if (isInteger(buffer[0..i]))
-                    return try parseInt(u8, buffer[0..i], 10);
-            }
-        }
-    }
-
-    if (self.in_string == true) {
+    if (self.in_string) {
         if (self.content[self.cur] == '"') {
             self.in_string = false;
             self.cur += 1;
             return self.data();
         }
 
-        defer self.cur += 1;
-        return self.content[self.cur];
+        const char_byte = self.content[self.cur];
+        self.cur += 1;
+        return char_byte;
     }
 
-    // try wemVM.debug("Rest: {s}\n", .{self.content[self.cur..]});
+    while (self.cur < self.content.len and isWhitespace(self.content[self.cur])) {
+        self.cur += 1;
+    }
 
-    return null;
+    if (self.cur >= self.content.len) return null;
+
+    if (self.content[self.cur] == '"') {
+        self.in_string = true;
+        self.cur += 1;
+        return self.data();
+    }
+
+    var buffer: [256]u8 = .{0} ** 256;
+    var i: usize = 0;
+
+    while (self.cur < self.content.len and self.content[self.cur] != '"' and self.content[self.cur] != ',') : ({
+        self.cur += 1;
+        i += 1;
+    }) {
+        if (isWhitespace(self.content[self.cur])) break;
+        buffer[i] = self.content[self.cur];
+    }
+
+    // Check if the loop terminated because of a comma
+    if (self.cur < self.content.len and self.content[self.cur] == ',') {
+        self.cur += 1; // Consume the comma
+    }
+
+    if (i == 0) return self.data();
+
+    const value = buffer[0..i];
+
+    // hex
+    if (startsWith(u8, value, "0x"))
+        return try parseInt(u8, value[2..], 16);
+
+    // binary
+    if (startsWith(u8, value, "0b"))
+        return try parseInt(u8, value[2..], 2);
+
+    // ints
+    return try parseInt(u8, value, 10);
 }
 
 fn isInteger(str: []const u8) bool {

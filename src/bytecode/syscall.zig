@@ -13,6 +13,7 @@ const Machine = @import("../machine.zig");
 
 pub const CallError = error{
     InvalidCall,
+    InvalidArg,
 } || std.fs.File.WriteError;
 
 pub const Call = struct {

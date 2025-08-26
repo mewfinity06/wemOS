@@ -145,13 +145,13 @@ pub fn display(self: *Self) !void {
         }
     }
     std.debug.print("\t.data:\n", .{});
-    std.debug.print("\t    {s}\n", .{self.data.items});
+    std.debug.print("\t    data len: {}\n", .{self.data.items.len});
+    std.debug.print("\t    {any}\n", .{self.data.items});
     std.debug.print("}}\n", .{});
 }
 
 pub fn step(self: *Self) !bool {
     defer self.pc += 1;
-    // try self.print();
     if (self.pc >= self.program.items.len) return false;
     switch (try u8_to_inst(self.program.items[self.pc])) {
         .nop => {},
@@ -254,6 +254,8 @@ pub fn step(self: *Self) !bool {
 
 pub fn run(self: *Self) !void {
     while (try self.step()) {}
+    self.sp = 0;
+    self.pc = 0;
 }
 
 fn u8_to_reg_name(v: u8) []const u8 {

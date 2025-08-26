@@ -1,8 +1,6 @@
 const std = @import("std");
 const wemVM = @import("wemVM");
-
-const machine = @import("machine.zig");
-const inst = @import("bytecode/instruction.zig").Inst;
+const Machine = @import("machine.zig");
 
 pub fn main() !void {
     // get allocator
@@ -21,7 +19,7 @@ pub fn main() !void {
     }
 
     // run machine
-    var m = try machine.Machine.from_file(allocator, argv[1]);
+    var m = try Machine.from_file(allocator, argv[1]);
     defer m.deinit();
 
     try m.display();

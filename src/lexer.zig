@@ -1,5 +1,6 @@
 const std = @import("std");
 const wemVM = @import("wemVM");
+
 const Inst = @import("bytecode/instruction.zig").Inst;
 const Machine = @import("machine.zig");
 
@@ -8,22 +9,33 @@ const parseInt = std.fmt.parseInt;
 const eql = std.mem.eql;
 const split = std.mem.splitAny;
 const startsWith = std.mem.startsWith;
+const endsWith = std.mem.endsWith;
 const trim = std.mem.trim;
 
 machine: *Machine,
+allocator: std.mem.Allocator,
 
 content: []u8 = undefined,
 cur: usize = 0,
+pc: u8 = 0,
 
 // flags
 in_string: bool = false,
 in_data_section: bool = false,
 
+// other data
+unresolved_gotos: std.StringArrayHashMap(u8),
+
 const Self = @This();
 
 /// Creates a new lexer.
 pub fn new(machine: *Machine, content: []u8) Self {
-    return .{ .machine = machine, .content = content };
+    return .{
+        .machine = machine,
+        .allocator = machine.allocator,
+        .content = content,
+        .unresolved_gotos = std.StringArrayHashMap(u8).init(machine.allocator),
+    };
 }
 
 /// Deinitializes the lexer.
@@ -34,6 +46,8 @@ pub fn deinit(self: *Self) void {
 // The main tokenizing function. It handles both instructions and data.
 /// Returns the next token.
 pub fn next(self: *Self) !?u8 {
+    defer self.pc += 1;
+
     // Check if we are already in the data section
     if (self.in_data_section) {
         return self.data();
@@ -89,6 +103,16 @@ pub fn next(self: *Self) !?u8 {
     if (eql(u8, buffer[0..i], "rmath")) return 0x21;
     if (eql(u8, buffer[0..i], "rret")) return 0x22;
     if (eql(u8, buffer[0..i], "rflag")) return 0x23;
+
+    // Lables
+    if (endsWith(u8, buffer[0..i], ":")) {
+        if (self.unresolved_gotos.contains(buffer[0 .. i - 1])) {
+            return self.unresolved_gotos.get(buffer[0 .. i - 1]);
+        } else {
+            try self.unresolved_gotos.put(buffer[0 .. i - 1], self.pc);
+            return self.next();
+        }
+    }
 
     // Get section
     if (eql(u8, buffer[0..i], ".section")) {

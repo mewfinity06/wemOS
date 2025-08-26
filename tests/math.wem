@@ -4,6 +4,3 @@ add
 mov rmath, r0
 mov r0, r1
 mov r0, r2
-
-.section data
-"Hello, world", 10, 0

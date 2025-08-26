@@ -71,6 +71,7 @@ pub fn next(self: *Self) !?u8 {
     if (eql(u8, buffer[0..i], "div")) return Inst.div.to_u8();
 
     if (eql(u8, buffer[0..i], "mov")) return Inst.mov.to_u8();
+    if (eql(u8, buffer[0..i], "set")) return Inst.set.to_u8();
     if (eql(u8, buffer[0..i], "syscall")) return Inst.syscall.to_u8();
 
     // general purpose registers
@@ -83,7 +84,6 @@ pub fn next(self: *Self) !?u8 {
     if (eql(u8, buffer[0..i], "rpop")) return 0x20;
     if (eql(u8, buffer[0..i], "rmath")) return 0x21;
     if (eql(u8, buffer[0..i], "rret")) return 0x22;
-
     if (eql(u8, buffer[0..i], "rflag")) return 0x23;
 
     // Get section
@@ -176,7 +176,7 @@ pub fn data(self: *Self) !?u8 {
         return self.content[self.cur];
     }
 
-    try wemVM.debug("Rest: {s}\n", .{self.content[self.cur..]});
+    // try wemVM.debug("Rest: {s}\n", .{self.content[self.cur..]});
 
     return null;
 }

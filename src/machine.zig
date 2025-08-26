@@ -5,6 +5,12 @@ const inst = @import("bytecode/instruction.zig");
 const Inst = inst.Inst;
 const u8_to_inst = inst.u8_to_inst;
 
+const syscall = @import("bytecode/syscall.zig");
+const Syscall = syscall.Syscall;
+const Call = syscall.Call;
+const CallFn = syscall.CallFn;
+const write = syscall.write;
+
 const Lexer = @import("lexer.zig");
 
 allocator: std.mem.Allocator,
@@ -16,10 +22,10 @@ sp: usize = 0,
 stack: [STACK_SIZE]u8 = .{0} ** STACK_SIZE,
 
 gpr: [GPR_SIZE]u8 = .{0} ** GPR_SIZE,
-rpop: u8 = 0,
-rmath: u8 = 0,
-rret: u8 = 0,
-rflag: u8 = 0,
+rpop: u8 = 0, //  0x20
+rmath: u8 = 0, // 0x21
+rret: u8 = 0, //  0x22
+rflag: u8 = 0, // 0x23
 
 data: std.ArrayList(u8) = undefined,
 
@@ -57,6 +63,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn print(self: *Self) !void {
+    wemVM.seperator();
+    defer wemVM.seperator();
     try wemVM.info("Self {{\n", .{});
     defer std.debug.print("}}\n", .{});
 
@@ -72,7 +80,7 @@ pub fn print(self: *Self) !void {
     }
 
     // Program
-    if (self.pc >= self.program_len) {
+    if (self.pc >= self.program.items.len) {
         std.debug.print("   pc: NULL\n", .{});
     } else {
         std.debug.print("   pc: 0x{X} -> 0x{X} ({any})\n", .{ self.pc, self.program.items[self.pc], u8_to_inst(self.program.items[self.pc]) });
@@ -87,14 +95,9 @@ pub fn print(self: *Self) !void {
     std.debug.print("      ret => 0x{X}, flags => 0x{X}\n", .{ self.rret, self.rflag });
 
     // Data
-    if (self.text_data.items.len > 0) {
+    if (self.data.items.len > 0) {
         std.debug.print("   Data\n", .{});
-        var i: usize = 0;
-        for (self.text_data.items) |text| {
-            std.debug.print("      - \"{s}\"", .{text});
-            if (i % 8 == 0) std.debug.print("\n", .{});
-            i += 1;
-        }
+        std.debug.print("    - {s}\n", .{self.data.items});
     }
 }
 
@@ -126,6 +129,15 @@ pub fn display(self: *Self) !void {
                 const dest = self.program.items[i];
                 std.debug.print("<src: 0x{X}>, <dest: 0x{X}>", .{ src, dest });
             },
+            .set => {
+                std.debug.print("set ", .{});
+                i += 1;
+                const reg = self.program.items[i];
+                i += 1;
+                const value = self.program.items[i];
+                std.debug.print("<reg: {s}>, <value: 0x{X}>", .{ u8_to_reg_name(reg), value });
+            },
+            .syscall => std.debug.print("set", .{}),
             else => {
                 std.debug.print("\r", .{});
                 try wemVM.err("Unhandled inst: 0x{X}", .{self.program.items[i]});
@@ -139,8 +151,8 @@ pub fn display(self: *Self) !void {
 
 pub fn step(self: *Self) !bool {
     defer self.pc += 1;
-    try self.print();
-    if (self.pc >= self.program_len) return false;
+    // try self.print();
+    if (self.pc >= self.program.items.len) return false;
     switch (try u8_to_inst(self.program.items[self.pc])) {
         .nop => {},
         .push => {
@@ -152,15 +164,7 @@ pub fn step(self: *Self) !bool {
             defer self.sp += 1;
             self.pc += 1;
             const reg = self.program.items[self.pc];
-            const reg_v = switch (reg) {
-                0x10 => self.gpr[0],
-                0x11 => self.gpr[1],
-                0x12 => self.gpr[2],
-                0x13 => self.gpr[3],
-                0x20 => self.rpop,
-                0x21 => self.rmath,
-                else => @panic("unknown register"),
-            };
+            const reg_v = self.u8_to_reg_value(reg);
             self.stack[self.sp] = reg_v;
         },
         .pop => {
@@ -204,36 +208,44 @@ pub fn step(self: *Self) !bool {
             try wemVM.info("Self halted successfully!\n", .{});
             return false;
         },
+        .set => {
+            self.pc += 1;
+            const reg_lit = self.program.items[self.pc];
+            self.pc += 1;
+
+            const reg = self.u8_to_reg_pointer(reg_lit);
+            const value = self.program.items[self.pc];
+
+            reg.* = value;
+        },
         .mov => {
             self.pc += 1;
             const src = self.program.items[self.pc];
             self.pc += 1;
             const dest = self.program.items[self.pc];
 
-            const src_r = switch (src) {
-                0x10 => self.gpr[0],
-                0x11 => self.gpr[1],
-                0x12 => self.gpr[2],
-                0x13 => self.gpr[3],
-                0x20 => self.rpop,
-                0x21 => self.rmath,
-                else => @panic("unknown register"),
-            };
-
-            const dest_r = switch (dest) {
-                0x10 => &self.gpr[0],
-                0x11 => &self.gpr[1],
-                0x12 => &self.gpr[2],
-                0x13 => &self.gpr[3],
-                0x20 => &self.rpop,
-                0x21 => &self.rmath,
-                else => @panic("unknown register"),
-            };
+            const src_r = self.u8_to_reg_value(src);
+            const dest_r = self.u8_to_reg_pointer(dest);
 
             dest_r.* = src_r;
         },
+        .syscall => {
+            var writer = Syscall(0, &.{
+                self.gpr[1],
+                self.gpr[2],
+                self.gpr[3],
+            }, 3, write);
+
+            switch (self.gpr[0]) {
+                0x0 => try writer.execute(writer, self),
+                else => @panic("Invalid syscall #"),
+            }
+        },
         else => {
-            try wemVM.err("Unhandled inst: 0x{X}\n", .{self.program.items[self.pc]});
+            try wemVM.err("Unhandled inst: {any} (0x{X})\n", .{
+                u8_to_inst(self.program.items[self.pc]),
+                self.program.items[self.pc],
+            });
             return false;
         },
     }
@@ -242,4 +254,46 @@ pub fn step(self: *Self) !bool {
 
 pub fn run(self: *Self) !void {
     while (try self.step()) {}
+}
+
+fn u8_to_reg_name(v: u8) []const u8 {
+    return switch (v) {
+        0x10 => "r0",
+        0x11 => "r1",
+        0x12 => "r2",
+        0x13 => "r3",
+        0x20 => "rpop",
+        0x21 => "rmath",
+        0x22 => "rret",
+        0x23 => "rflag",
+        else => @panic("Unknown regster"),
+    };
+}
+
+fn u8_to_reg_value(self: *Self, v: u8) u8 {
+    return switch (v) {
+        0x10 => self.gpr[0],
+        0x11 => self.gpr[1],
+        0x12 => self.gpr[2],
+        0x13 => self.gpr[3],
+        0x20 => self.rpop,
+        0x21 => self.rmath,
+        0x22 => self.rret,
+        0x23 => self.rflag,
+        else => @panic("Unknown register"),
+    };
+}
+
+fn u8_to_reg_pointer(self: *Self, v: u8) *u8 {
+    return switch (v) {
+        0x10 => &self.gpr[0],
+        0x11 => &self.gpr[1],
+        0x12 => &self.gpr[2],
+        0x13 => &self.gpr[3],
+        0x20 => &self.rpop,
+        0x21 => &self.rmath,
+        0x22 => &self.rret,
+        0x23 => &self.rflag,
+        else => @panic("Unknown register"),
+    };
 }

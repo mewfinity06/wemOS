@@ -12,7 +12,8 @@ pub const Inst = enum {
     div, // 0x43, div -> rmath
 
     mov, //     0x50, mov <src> <dest>
-    syscall, // 0x51, syscall
+    set, //     0x51, set <reg> <u8>
+    syscall, // 0x52, syscall
 
     ignore,
 

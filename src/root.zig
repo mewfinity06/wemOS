@@ -15,6 +15,10 @@ pub fn usage() !void {
     try stderr.flush();
 }
 
+pub fn seperator() void {
+    std.debug.print("--------------------------------------\n", .{});
+}
+
 pub fn err(comptime fmt: []const u8, args: anytype) !void {
     var buffer: [1024]u8 = undefined;
     var writer = std.fs.File.stderr().writer(&buffer);

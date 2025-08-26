@@ -1,0 +1,8 @@
+.section executable
+    push 0x1
+    goto 0x4
+    push 0x2
+    halt
+
+.section data
+    "hello"

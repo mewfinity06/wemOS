@@ -142,6 +142,12 @@ pub fn display(self: *Self) !void {
                 std.debug.print("<reg: {s}>, <value: 0x{X}>", .{ u8_to_reg_name(reg), value });
             },
             .syscall => std.debug.print("set", .{}),
+            .goto => {
+                std.debug.print("goto ", .{});
+                i += 1;
+                const arg = self.program.items[i];
+                std.debug.print("<arg: 0x{X}>", .{arg});
+            },
             else => {
                 std.debug.print("\r", .{});
                 try wemVM.err("Unhandled inst: 0x{X}", .{self.program.items[i]});
@@ -242,6 +248,11 @@ pub fn step(self: *Self) !bool {
                 0x0 => try writer.execute(writer, self),
                 else => @panic("Invalid syscall #"),
             }
+        },
+        .goto => {
+            self.pc += 1;
+            const addr = self.program.items[self.pc];
+            self.pc = addr - 1;
         },
         else => {
             try wemVM.err("Unhandled inst: {any} (0x{X})\n", .{

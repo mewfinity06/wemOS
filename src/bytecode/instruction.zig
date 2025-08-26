@@ -15,6 +15,7 @@ pub const Inst = enum {
     mov, //     0x50, mov <src> <dest>
     set, //     0x51, set <reg> <u8>
     syscall, // 0x52, syscall
+    goto, // 0x53, goto <addr>
 
     ignore,
 

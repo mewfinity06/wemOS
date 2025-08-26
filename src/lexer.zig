@@ -76,6 +76,7 @@ pub fn next(self: *Self) !?u8 {
     if (eql(u8, buffer[0..i], "mov")) return Inst.mov.to_u8();
     if (eql(u8, buffer[0..i], "set")) return Inst.set.to_u8();
     if (eql(u8, buffer[0..i], "syscall")) return Inst.syscall.to_u8();
+    if (eql(u8, buffer[0..i], "goto")) return Inst.goto.to_u8();
 
     // general purpose registers
     if (eql(u8, buffer[0..i], "r0")) return 0x10;
@@ -107,8 +108,11 @@ pub fn next(self: *Self) !?u8 {
         if (eql(u8, buffer[0..i], "data")) {
             self.in_data_section = true;
             return self.data();
+        } else if (eql(u8, buffer[0..i], "executable")) {
+            self.in_data_section = false;
+            return self.next();
         } else {
-            try wemVM.err("Incompatible header section `{s}`\n", .{buffer});
+            try wemVM.err("Incompatible header section `{s}`\n", .{buffer[0..i]});
             return null;
         }
     }

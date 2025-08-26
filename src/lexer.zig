@@ -1,7 +1,7 @@
 const std = @import("std");
 const wemVM = @import("wemVM");
 const Inst = @import("bytecode/instruction.zig").Inst;
-const Machine = @import("machine.zig").Machine;
+const Machine = @import("machine.zig");
 
 const isWhitespace = std.ascii.isWhitespace;
 const parseInt = std.fmt.parseInt;

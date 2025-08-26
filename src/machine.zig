@@ -29,7 +29,7 @@ pub const GPR_SIZE: usize = 4;
 const Self = @This();
 
 pub fn from_file(allocator: std.mem.Allocator, file_path: []const u8) !Self {
-    var res = .{
+    var res = Self{
         .allocator = allocator,
         .program = try std.ArrayList(u8).initCapacity(allocator, 100),
         .data = try std.ArrayList(u8).initCapacity(allocator, 100),
@@ -132,7 +132,6 @@ pub fn display(self: *Self) !void {
             },
         }
     }
-    i = 1;
     std.debug.print("\t.data:\n", .{});
     std.debug.print("\t    {s}\n", .{self.data.items});
     std.debug.print("}}\n", .{});

@@ -11,11 +11,13 @@ const Machine = @import("../machine.zig");
 // | write (0) | 0  | fd | *buffer | size | fd(0) -> stdout, fd(1) -> stderr
 // |--------------------------------------|
 
+/// Represents an error that can occur during a syscall.
 pub const CallError = error{
     InvalidCall,
     InvalidArg,
 } || std.fs.File.WriteError;
 
+/// Represents a syscall.
 pub const Call = struct {
     sys: u8,
     args: []const u8,
@@ -23,6 +25,7 @@ pub const Call = struct {
     execute: *const fn (self: Call, machine: *Machine) CallError!void,
 };
 
+/// Creates a new syscall.
 pub fn Syscall(
     sys: u8,
     args: []const u8,
@@ -37,6 +40,7 @@ pub fn Syscall(
     };
 }
 
+/// The `write` syscall.
 pub fn write(self: Call, machine: *Machine) CallError!void {
     // check if write call
     if (self.sys != 0x0) return error.InvalidCall;

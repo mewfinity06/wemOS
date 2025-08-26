@@ -21,15 +21,18 @@ in_data_section: bool = false,
 
 const Self = @This();
 
+/// Creates a new lexer.
 pub fn new(machine: *Machine, content: []u8) Self {
     return .{ .machine = machine, .content = content };
 }
 
+/// Deinitializes the lexer.
 pub fn deinit(self: *Self) void {
     self.allocator.free(self.data);
 }
 
 // The main tokenizing function. It handles both instructions and data.
+/// Returns the next token.
 pub fn next(self: *Self) !?u8 {
     // Check if we are already in the data section
     if (self.in_data_section) {
@@ -126,6 +129,7 @@ pub fn next(self: *Self) !?u8 {
     return null;
 }
 
+/// Parses the data section of the file.
 pub fn data(self: *Self) !?u8 {
     if (self.cur >= self.content.len) return null;
 
@@ -185,6 +189,7 @@ pub fn data(self: *Self) !?u8 {
     return try parseInt(u8, value, 10);
 }
 
+/// Checks if a string is an integer.
 fn isInteger(str: []const u8) bool {
     _ = parseInt(u8, str, 10) catch return false;
     return true;

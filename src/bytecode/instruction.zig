@@ -1,3 +1,4 @@
+/// Represents a single instruction in the wemVM.
 pub const Inst = enum {
     halt, //  0x0,  halt
     nop, //   0x1,  nop
@@ -17,11 +18,13 @@ pub const Inst = enum {
 
     ignore,
 
+    /// Converts an instruction to its byte representation.
     pub fn to_u8(i: Inst) u8 {
         return @intFromEnum(i);
     }
 };
 
+/// Converts a byte to its instruction representation.
 pub fn u8_to_inst(n: u8) !Inst {
     return @enumFromInt(n);
 }

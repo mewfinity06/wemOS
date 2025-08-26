@@ -2,6 +2,7 @@ const std = @import("std");
 const wemVM = @import("wemVM");
 const Machine = @import("machine.zig");
 
+/// The entry point of the program.
 pub fn main() !void {
     // get allocator
     var da = std.heap.DebugAllocator(.{}){};

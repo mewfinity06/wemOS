@@ -34,6 +34,7 @@ pub const GPR_SIZE: usize = 4;
 
 const Self = @This();
 
+/// Creates a new machine from a file.
 pub fn from_file(allocator: std.mem.Allocator, file_path: []const u8) !Self {
     var res = Self{
         .allocator = allocator,
@@ -57,11 +58,13 @@ pub fn from_file(allocator: std.mem.Allocator, file_path: []const u8) !Self {
     return res;
 }
 
+/// Deinitializes the machine.
 pub fn deinit(self: *Self) void {
     self.program.deinit(self.allocator);
     self.data.deinit(self.allocator);
 }
 
+/// Prints the machine's state.
 pub fn print(self: *Self) !void {
     wemVM.seperator();
     defer wemVM.seperator();
@@ -101,6 +104,7 @@ pub fn print(self: *Self) !void {
     }
 }
 
+/// Displays the machine's program and data.
 pub fn display(self: *Self) !void {
     try wemVM.info("Program {{\n", .{});
     var i: usize = 0;
@@ -150,11 +154,13 @@ pub fn display(self: *Self) !void {
     std.debug.print("}}\n", .{});
 }
 
+/// Executes a single instruction.
 pub fn step(self: *Self) !bool {
     defer self.pc += 1;
     if (self.pc >= self.program.items.len) return false;
     switch (try u8_to_inst(self.program.items[self.pc])) {
         .nop => {},
+        .halt => return false,
         .push => {
             defer self.sp += 1;
             self.pc += 1;
@@ -204,10 +210,6 @@ pub fn step(self: *Self) !bool {
             self.sp -= 1;
             self.rmath = b / a;
         },
-        .halt => {
-            try wemVM.info("Self halted successfully!\n", .{});
-            return false;
-        },
         .set => {
             self.pc += 1;
             const reg_lit = self.program.items[self.pc];
@@ -252,12 +254,14 @@ pub fn step(self: *Self) !bool {
     return true;
 }
 
+/// Runs the machine.
 pub fn run(self: *Self) !void {
     while (try self.step()) {}
     self.sp = 0;
     self.pc = 0;
 }
 
+/// Converts a register's byte representation to its name.
 fn u8_to_reg_name(v: u8) []const u8 {
     return switch (v) {
         0x10 => "r0",
@@ -272,6 +276,7 @@ fn u8_to_reg_name(v: u8) []const u8 {
     };
 }
 
+/// Converts a register's byte representation to its value.
 fn u8_to_reg_value(self: *Self, v: u8) u8 {
     return switch (v) {
         0x10 => self.gpr[0],
@@ -286,6 +291,7 @@ fn u8_to_reg_value(self: *Self, v: u8) u8 {
     };
 }
 
+/// Converts a register's byte representation to a pointer to its value.
 fn u8_to_reg_pointer(self: *Self, v: u8) *u8 {
     return switch (v) {
         0x10 => &self.gpr[0],

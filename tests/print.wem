@@ -1,8 +1,9 @@
-set r0 0x0
-set r1 0x0
-set r2 0x0
-set r3 0xE
-syscall
+.section executable
+    set r0 0x0
+    set r1 0x0
+    set r2 0x0
+    set r3 0xE
+    syscall
 
 .section data
-"Hello, world", 10, 0
+    "Hello, world" 10 0

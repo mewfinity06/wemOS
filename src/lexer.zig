@@ -4,6 +4,8 @@ const wemVM = @import("wemVM");
 const Inst = @import("bytecode/instruction.zig").Inst;
 const Machine = @import("machine.zig");
 
+const Token = @import("token.zig").Token;
+
 const isWhitespace = std.ascii.isWhitespace;
 const parseInt = std.fmt.parseInt;
 const eql = std.mem.eql;
@@ -23,9 +25,6 @@ pc: u8 = 0,
 in_string: bool = false,
 in_data_section: bool = false,
 
-// other data
-unresolved_gotos: std.StringArrayHashMap(u8),
-
 const Self = @This();
 
 /// Creates a new lexer.
@@ -34,19 +33,17 @@ pub fn new(machine: *Machine, content: []u8) Self {
         .machine = machine,
         .allocator = machine.allocator,
         .content = content,
-        .unresolved_gotos = std.StringArrayHashMap(u8).init(machine.allocator),
     };
 }
 
 /// Deinitializes the lexer.
-pub fn deinit(self: *Self) void {
-    self.allocator.free(self.data);
-}
+pub fn deinit(_: *Self) void {}
 
-// The main tokenizing function. It handles both instructions and data.
+/// The main tokenizing function. It handles both instructions and data.
 /// Returns the next token.
-pub fn next(self: *Self) !?u8 {
+pub fn next(self: *Self) !?Token {
     defer self.pc += 1;
+    errdefer self.machine.deinit();
 
     // Check if we are already in the data section
     if (self.in_data_section) {
@@ -75,43 +72,53 @@ pub fn next(self: *Self) !?u8 {
     if (i == 0) return null;
 
     // insts
-    if (eql(u8, buffer[0..i], "halt")) return Inst.halt.to_u8();
-    if (eql(u8, buffer[0..i], "nop")) return Inst.nop.to_u8();
-    if (eql(u8, buffer[0..i], "push")) return Inst.push.to_u8();
-    if (eql(u8, buffer[0..i], "pushr")) return Inst.pushr.to_u8();
-    if (eql(u8, buffer[0..i], "pop")) return Inst.pop.to_u8();
-    if (eql(u8, buffer[0..i], "popr")) return Inst.popr.to_u8();
+    if (eql(u8, buffer[0..i], "halt")) return Token{ .instruction = Inst.halt };
+    if (eql(u8, buffer[0..i], "nop")) return Token{ .instruction = Inst.nop };
+    if (eql(u8, buffer[0..i], "push")) return Token{ .instruction = Inst.push };
+    if (eql(u8, buffer[0..i], "pushr")) return Token{ .instruction = Inst.pushr };
+    if (eql(u8, buffer[0..i], "pop")) return Token{ .instruction = Inst.pop };
+    if (eql(u8, buffer[0..i], "popr")) return Token{ .instruction = Inst.popr };
 
-    if (eql(u8, buffer[0..i], "add")) return Inst.add.to_u8();
-    if (eql(u8, buffer[0..i], "sub")) return Inst.sub.to_u8();
-    if (eql(u8, buffer[0..i], "mul")) return Inst.mul.to_u8();
-    if (eql(u8, buffer[0..i], "div")) return Inst.div.to_u8();
+    if (eql(u8, buffer[0..i], "add")) return Token{ .instruction = Inst.add };
+    if (eql(u8, buffer[0..i], "sub")) return Token{ .instruction = Inst.sub };
+    if (eql(u8, buffer[0..i], "mul")) return Token{ .instruction = Inst.mul };
+    if (eql(u8, buffer[0..i], "div")) return Token{ .instruction = Inst.div };
 
-    if (eql(u8, buffer[0..i], "mov")) return Inst.mov.to_u8();
-    if (eql(u8, buffer[0..i], "set")) return Inst.set.to_u8();
-    if (eql(u8, buffer[0..i], "syscall")) return Inst.syscall.to_u8();
-    if (eql(u8, buffer[0..i], "goto")) return Inst.goto.to_u8();
+    if (eql(u8, buffer[0..i], "mov")) return Token{ .instruction = Inst.mov };
+    if (eql(u8, buffer[0..i], "set")) return Token{ .instruction = Inst.set };
+    if (eql(u8, buffer[0..i], "syscall")) return Token{ .instruction = Inst.syscall };
+    if (eql(u8, buffer[0..i], "goto")) return Token{ .instruction = Inst.goto };
 
     // general purpose registers
-    if (eql(u8, buffer[0..i], "r0")) return 0x10;
-    if (eql(u8, buffer[0..i], "r1")) return 0x11;
-    if (eql(u8, buffer[0..i], "r2")) return 0x12;
-    if (eql(u8, buffer[0..i], "r3")) return 0x13;
+    if (eql(u8, buffer[0..i], "r0")) return Token{ .register = 0x10 };
+    if (eql(u8, buffer[0..i], "r1")) return Token{ .register = 0x11 };
+    if (eql(u8, buffer[0..i], "r2")) return Token{ .register = 0x12 };
+    if (eql(u8, buffer[0..i], "r3")) return Token{ .register = 0x13 };
 
     // special purpose registers
-    if (eql(u8, buffer[0..i], "rpop")) return 0x20;
-    if (eql(u8, buffer[0..i], "rmath")) return 0x21;
-    if (eql(u8, buffer[0..i], "rret")) return 0x22;
-    if (eql(u8, buffer[0..i], "rflag")) return 0x23;
+    if (eql(u8, buffer[0..i], "rpop")) return Token{ .register = 0x20 };
+    if (eql(u8, buffer[0..i], "rmath")) return Token{ .register = 0x21 };
+    if (eql(u8, buffer[0..i], "rret")) return Token{ .register = 0x22 };
+    if (eql(u8, buffer[0..i], "rflag")) return Token{ .register = 0x23 };
 
-    // Lables
+    // get label decls
     if (endsWith(u8, buffer[0..i], ":")) {
-        if (self.unresolved_gotos.contains(buffer[0 .. i - 1])) {
-            return self.unresolved_gotos.get(buffer[0 .. i - 1]);
-        } else {
-            try self.unresolved_gotos.put(buffer[0 .. i - 1], self.pc);
-            return self.next();
-        }
+        // try wemVM.debug("Label decl: {s}, i: {}\n", .{ buffer[0..i], i });
+
+        const label_buffer = try self.allocator.alloc(u8, i);
+        for (label_buffer[0..i], buffer[0..i]) |*d, s| d.* = s;
+
+        return Token{ .label_definition = .{ label_buffer, null } };
+    }
+
+    // get label call
+    if (startsWith(u8, buffer[0..i], ":")) {
+        // try wemVM.debug("Label call: {s}, i: {}\n", .{ buffer[0..i], i });
+
+        const label_buffer = try self.allocator.alloc(u8, i);
+        for (label_buffer[0..i], buffer[0..i]) |*d, s| d.* = s;
+
+        return Token{ .label_reference = .{ label_buffer, null } };
     }
 
     // Get section
@@ -143,22 +150,22 @@ pub fn next(self: *Self) !?u8 {
 
     // hex
     if (startsWith(u8, buffer[0..i], "0x"))
-        return try parseInt(u8, buffer[2..i], 16);
+        return Token{ .literal = try parseInt(u8, buffer[2..i], 16) };
 
     // binary
     if (startsWith(u8, buffer[0..i], "0b"))
-        return try parseInt(u8, buffer[2..i], 2);
+        return Token{ .literal = try parseInt(u8, buffer[2..i], 2) };
 
     // ints
     if (isInteger(buffer[0..i]))
-        return try parseInt(u8, buffer[0..i], 10);
+        return Token{ .literal = try parseInt(u8, buffer[0..i], 10) };
 
     try wemVM.err("Unhandled token: `{s}`\n", .{buffer[0..i]});
-    return null;
+    return error.UnhandledToken;
 }
 
 /// Parses the data section of the file.
-pub fn data(self: *Self) !?u8 {
+pub fn data(self: *Self) !?Token {
     if (self.cur >= self.content.len) return null;
 
     if (self.in_string) {
@@ -170,7 +177,7 @@ pub fn data(self: *Self) !?u8 {
 
         const char_byte = self.content[self.cur];
         self.cur += 1;
-        return char_byte;
+        return Token{ .literal = char_byte };
     }
 
     while (self.cur < self.content.len and isWhitespace(self.content[self.cur])) {
@@ -207,14 +214,17 @@ pub fn data(self: *Self) !?u8 {
 
     // hex
     if (startsWith(u8, value, "0x"))
-        return try parseInt(u8, value[2..], 16);
+        return Token{ .literal = try parseInt(u8, buffer[2..i], 16) };
 
     // binary
     if (startsWith(u8, value, "0b"))
-        return try parseInt(u8, value[2..], 2);
+        return Token{ .literal = try parseInt(u8, buffer[2..i], 2) };
 
-    // ints
-    return try parseInt(u8, value, 10);
+    // // ints
+    if (isInteger(buffer[0..i]))
+        return Token{ .literal = try parseInt(u8, buffer[0..i], 10) };
+
+    return null;
 }
 
 /// Checks if a string is an integer.

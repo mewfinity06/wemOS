@@ -1,6 +1,20 @@
-push 0x1
-push 0x2
-add
-mov rmath, r0
-mov r0, r1
-mov r0, r2
+.section executable
+    push 0x1
+    push 0x2
+    add
+    mov rmath, r0
+
+    push 0x3
+    push 0x2
+    sub
+    mov rmath, r1
+
+    push 0x4
+    push 0x5
+    mul
+    mov rmath, r2
+
+    push 0x14
+    push 0x4
+    div
+    mov rmath, r3

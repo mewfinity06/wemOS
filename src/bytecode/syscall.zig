@@ -45,7 +45,7 @@ pub fn write(self: Call, machine: *Machine) CallError!void {
     // check if write call
     if (self.sys != 0x0) return error.InvalidCall;
     const fd = self.args[0];
-    const buffer = self.args[1];
+    const bf = self.args[1];
     const size = self.args[2];
 
     const file = switch (fd) {
@@ -54,6 +54,13 @@ pub fn write(self: Call, machine: *Machine) CallError!void {
         else => @panic("Unhandled file descriptor"),
     };
 
-    const string = machine.data.items[buffer .. buffer + size];
-    _ = try file.write(string);
+    var buffer: [1024]u8 = undefined;
+
+    for (machine.data.items[bf .. bf + size], 0..) |t, i| {
+        buffer[i] = t.literal;
+    }
+
+    // wemVM.debug("Write buffer: {any}\n", .{buffer}) catch {};
+
+    _ = try file.write(&buffer);
 }

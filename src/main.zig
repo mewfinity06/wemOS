@@ -23,8 +23,7 @@ pub fn main() !void {
     var m = try Machine.from_file(allocator, argv[1]);
     defer m.deinit();
 
-    wemVM.seperator();
     try m.display();
-    wemVM.seperator();
     try m.run();
+    try m.print();
 }

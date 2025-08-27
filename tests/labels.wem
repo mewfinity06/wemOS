@@ -1,0 +1,12 @@
+.section executable
+    goto :main
+main:
+    push 0x1
+    push 0x2
+    pop
+start_skip:
+    push 0x3
+end_skip:
+    halt
+
+.section data

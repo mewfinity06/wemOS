@@ -1,9 +1,9 @@
 const std = @import("std");
 const wemVM = @import("wemVM");
 
-const inst = @import("bytecode/instruction.zig");
-const Inst = inst.Inst;
-const u8_to_inst = inst.u8_to_inst;
+const inst_lib = @import("bytecode/instruction.zig");
+const Inst = inst_lib.Inst;
+const u8_to_inst = inst_lib.u8_to_inst;
 
 const syscall = @import("bytecode/syscall.zig");
 const Syscall = syscall.Syscall;
@@ -13,10 +13,13 @@ const write = syscall.write;
 
 const Lexer = @import("lexer.zig");
 
+const Token = @import("token.zig").Token;
+
 allocator: std.mem.Allocator,
 
 pc: usize = 0,
-program: std.ArrayList(u8) = undefined,
+program: std.ArrayList(Token) = undefined,
+data: std.ArrayList(Token) = undefined,
 
 sp: usize = 0,
 stack: [STACK_SIZE]u8 = .{0} ** STACK_SIZE,
@@ -27,10 +30,11 @@ rmath: u8 = 0, // 0x21
 rret: u8 = 0, //  0x22
 rflag: u8 = 0, // 0x23
 
-data: std.ArrayList(u8) = undefined,
+unresolved_labels: std.AutoHashMap([]const u8, u8),
+resolved_labels: std.AutoHashMap([]const u8, u8),
 
 pub const STACK_SIZE: usize = 8;
-pub const GPR_SIZE: usize = 4;
+pub const GPR_SIZE: usize = 8;
 
 const Self = @This();
 
@@ -38,19 +42,24 @@ const Self = @This();
 pub fn from_file(allocator: std.mem.Allocator, file_path: []const u8) !Self {
     var res = Self{
         .allocator = allocator,
-        .program = try std.ArrayList(u8).initCapacity(allocator, 100),
-        .data = try std.ArrayList(u8).initCapacity(allocator, 100),
+        .program = try std.ArrayList(Token).initCapacity(allocator, 0),
+        .data = try std.ArrayList(Token).initCapacity(allocator, 0),
+        .unresolved_labels = std.AutoHashMap([]const u8, u8).init(allocator),
+        .resolved_labels = std.AutoHashMap([]const u8, u8).init(allocator),
     };
 
     const content = try std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize));
     defer allocator.free(content);
 
     var l = Lexer.new(&res, content);
+    defer l.deinit();
 
     while (try l.next()) |t| {
         if (l.in_data_section) {
+            // try wemVM.debug("From data_section: {any}\n", .{t});
             try res.data.append(res.allocator, t);
         } else {
+            // try wemVM.debug("From executable_section: {any}\n", .{t});
             try res.program.append(res.allocator, t);
         }
     }
@@ -58,16 +67,54 @@ pub fn from_file(allocator: std.mem.Allocator, file_path: []const u8) !Self {
     return res;
 }
 
+fn create_label(self: *Self, label: []const u8) !void {
+    if (self.resolved_labels.contains(label)) {
+        try create_label_known(self, label);
+    } else {
+        try create_label_unknown(self, label);
+    }
+}
+
+fn create_label_known(self: *Self, label: []const u8) !void {
+    _ = .{ self, label };
+}
+
+fn create_label_unknown(self: *Self, label: []const u8) !void {
+    _ = .{ self, label };
+}
+
+fn remove_label(self: *Self, label: []const u8) !void {
+    _ = .{ self, label };
+}
+
+fn resolve_label(self: *Self, label: []const u8) !u8 {
+    _ = .{ self, label };
+    return error.Unimplemented;
+}
+
 /// Deinitializes the machine.
 pub fn deinit(self: *Self) void {
-    self.program.deinit(self.allocator);
+    for (self.program.items) |dp| {
+        switch (dp) {
+            .label_definition => |ld| {
+                // wemVM.debug("deinit: label_definition\n", .{}) catch {};
+                self.allocator.free(ld.@"0");
+            },
+            .label_reference => |lr| {
+                // wemVM.debug("deinit: label_reference\n", .{}) catch {};
+                self.allocator.free(lr.@"0");
+            },
+            else => {},
+        }
+    }
     self.data.deinit(self.allocator);
+    self.program.deinit(self.allocator);
 }
 
 /// Prints the machine's state.
 pub fn print(self: *Self) !void {
-    wemVM.seperator();
-    defer wemVM.seperator();
+    try wemVM.seperator();
+    defer wemVM.seperator() catch {};
     try wemVM.info("Self {{\n", .{});
     defer std.debug.print("}}\n", .{});
 
@@ -86,7 +133,7 @@ pub fn print(self: *Self) !void {
     if (self.pc >= self.program.items.len) {
         std.debug.print("   pc: NULL\n", .{});
     } else {
-        std.debug.print("   pc: 0x{X} -> 0x{X} ({any})\n", .{ self.pc, self.program.items[self.pc], u8_to_inst(self.program.items[self.pc]) });
+        std.debug.print("   pc: 0x{X} -> 0x{X} ({any})\n", .{ self.pc, self.program.items[self.pc].instruction.to_u8(), self.program.items[self.pc].instruction });
     }
     // Registers
     std.debug.print("   General Purpose Registers:\n", .{});
@@ -96,12 +143,6 @@ pub fn print(self: *Self) !void {
     std.debug.print("   Special Purpose Registers:\n", .{});
     std.debug.print("      pop => 0x{X}, math  => 0x{X}\n", .{ self.rpop, self.rmath });
     std.debug.print("      ret => 0x{X}, flags => 0x{X}\n", .{ self.rret, self.rflag });
-
-    // Data
-    if (self.data.items.len > 0) {
-        std.debug.print("   Data\n", .{});
-        std.debug.print("    - {s}\n", .{self.data.items});
-    }
 }
 
 /// Displays the machine's program and data.
@@ -109,156 +150,138 @@ pub fn display(self: *Self) !void {
     try wemVM.info("Program {{\n", .{});
     var i: usize = 0;
     while (i < self.program.items.len) : (i += 1) {
-        std.debug.print("(0x{X})\t", .{i});
         defer std.debug.print("\n", .{});
-        switch (try u8_to_inst(self.program.items[i])) {
-            .halt => std.debug.print("halt", .{}),
-            .nop => std.debug.print("nop", .{}),
-            .push => {
-                std.debug.print("push ", .{});
-                i += 1;
-                const arg = self.program.items[i];
-                std.debug.print("<arg: 0x{X}>", .{arg});
+        switch (self.program.items[i]) {
+            .label_definition => |ld| {
+                std.debug.print("- {s}", .{ld.@"0"});
             },
-            .pop => std.debug.print("pop", .{}),
-            .add => std.debug.print("add", .{}),
-            .sub => std.debug.print("sub", .{}),
-            .mul => std.debug.print("mul", .{}),
-            .div => std.debug.print("div", .{}),
-            .mov => {
-                std.debug.print("mov ", .{});
-                i += 1;
-                const src = self.program.items[i];
-                i += 1;
-                const dest = self.program.items[i];
-                std.debug.print("<src: 0x{X}>, <dest: 0x{X}>", .{ src, dest });
+            .instruction => |in| {
+                std.debug.print("(0x{X})\t", .{i});
+                switch (in) {
+                    .halt => std.debug.print("halt", .{}),
+                    .nop => std.debug.print("nop", .{}),
+                    .push => {
+                        std.debug.print("push ", .{});
+                        i += 1;
+                        const arg = self.program.items[i].literal;
+                        std.debug.print("<arg: 0x{X}>", .{arg});
+                    },
+                    .pop => std.debug.print("pop", .{}),
+                    .add => std.debug.print("add", .{}),
+                    .sub => std.debug.print("sub", .{}),
+                    .mul => std.debug.print("mul", .{}),
+                    .div => std.debug.print("div", .{}),
+                    .mov => {
+                        std.debug.print("mov ", .{});
+                        i += 1;
+                        const src = self.program.items[i].register;
+                        i += 1;
+                        const dest = self.program.items[i].register;
+                        std.debug.print("<src: {s}>, <dest: {s}>", .{ u8_to_reg_name(src), u8_to_reg_name(dest) });
+                    },
+                    .set => {
+                        std.debug.print("set ", .{});
+                        i += 1;
+                        const reg = self.program.items[i].register;
+                        i += 1;
+                        const value = self.program.items[i].literal;
+                        std.debug.print("<reg: {s}>, <value: 0x{X}>", .{ u8_to_reg_name(reg), value });
+                    },
+                    .syscall => std.debug.print("set", .{}),
+                    .goto => {
+                        std.debug.print("goto ", .{});
+                        i += 1;
+                        const arg = self.program.items[i].label_reference.@"0";
+                        std.debug.print("<label: {s}>", .{arg});
+                    },
+                    else => {
+                        std.debug.print("\r", .{});
+                        try wemVM.err("Unhandled inst: {any}", .{self.program.items[i]});
+                    },
+                }
             },
-            .set => {
-                std.debug.print("set ", .{});
-                i += 1;
-                const reg = self.program.items[i];
-                i += 1;
-                const value = self.program.items[i];
-                std.debug.print("<reg: {s}>, <value: 0x{X}>", .{ u8_to_reg_name(reg), value });
-            },
-            .syscall => std.debug.print("set", .{}),
-            .goto => {
-                std.debug.print("goto ", .{});
-                i += 1;
-                const arg = self.program.items[i];
-                std.debug.print("<arg: 0x{X}>", .{arg});
-            },
-            else => {
-                std.debug.print("\r", .{});
-                try wemVM.err("Unhandled inst: 0x{X}", .{self.program.items[i]});
+            else => |e| {
+                try wemVM.err("Invalid: {any}", .{e});
             },
         }
     }
     std.debug.print("\t.data:\n", .{});
     std.debug.print("\t    data len: {}\n", .{self.data.items.len});
-    std.debug.print("\t    {any}\n", .{self.data.items});
+    for (self.data.items) |dp| {
+        std.debug.print("\t    {any}\n", .{dp});
+    }
     std.debug.print("}}\n", .{});
+}
+
+fn advance(self: *Self) Token {
+    defer self.pc += 1;
+    return self.program.items[self.pc];
+}
+
+fn get_stack(self: *Self, by: isize) u8 {
+    defer {
+        if (by > 0)
+            self.sp += @intCast(by)
+        else if (by < 0)
+            self.sp -= @intCast(by)
+        else {}
+    }
+    return self.stack[self.sp];
 }
 
 /// Executes a single instruction.
 pub fn step(self: *Self) !bool {
-    defer self.pc += 1;
     if (self.pc >= self.program.items.len) return false;
-    switch (try u8_to_inst(self.program.items[self.pc])) {
-        .nop => {},
-        .halt => return false,
-        .push => {
-            defer self.sp += 1;
-            self.pc += 1;
-            self.stack[self.sp] = self.program.items[self.pc];
+    switch (self.advance()) {
+        .instruction => |inst| switch (inst) {
+            .halt => return false,
+            .nop => {},
+            .push => {
+                const value = self.advance().literal;
+                self.stack[self.sp] = value;
+                self.sp += 1;
+            },
+            .pushr => {
+                const value = self.u8_to_reg_value(self.advance().register);
+                self.stack[self.sp] = value;
+                self.sp += 1;
+            },
+            .pop => {
+                const value = self.stack[self.sp];
+                self.rpop = value;
+                self.sp -= 1;
+            },
+            .popr => {
+                const value = self.u8_to_reg_value(self.advance().register);
+                self.rpop = value;
+                self.sp -= 1;
+            },
+            .add => {
+                const b = self.get_stack(-1);
+                const a = self.get_stack(-1);
+                self.rmath = b + a;
+            },
+            .goto => {
+                const addr = self.advance().label_reference;
+                _ = addr;
+            },
+            else => |in| {
+                try wemVM.err("Unhandled instruction: {any}\n", .{in});
+                return false;
+            },
         },
-        .pushr => {
-            defer self.sp += 1;
-            self.pc += 1;
-            const reg = self.program.items[self.pc];
-            const reg_v = self.u8_to_reg_value(reg);
-            self.stack[self.sp] = reg_v;
+        .label_definition => |ld| {
+            // handle label definitions
+            const name, _ = ld;
+            try wemVM.info("Label definition: {s}\n", .{name});
         },
-        .pop => {
-            self.sp -= 1;
-            self.rpop = self.stack[self.sp];
-            self.stack[self.sp] = 0;
+        .label_reference => |lr| {
+            // handle label references
+            const name, _ = lr;
+            try wemVM.info("Label definition: {s}\n", .{name});
         },
-        .add => {
-            if (self.sp < 1) return error.StackUnderflow;
-            const a = self.stack[self.sp - 1];
-            self.sp -= 1;
-            const b = self.stack[self.sp - 1];
-            self.sp -= 1;
-            self.rmath = b + a;
-        },
-        .sub => {
-            if (self.sp < 1) return error.StackUnderflow;
-            const a = self.stack[self.sp - 1];
-            self.sp -= 1;
-            const b = self.stack[self.sp - 1];
-            self.sp -= 1;
-            self.rmath = b - a;
-        },
-        .mul => {
-            if (self.sp < 1) return error.StackUnderflow;
-            const a = self.stack[self.sp - 1];
-            self.sp -= 1;
-            const b = self.stack[self.sp - 1];
-            self.sp -= 1;
-            self.rmath = b * a;
-        },
-        .div => {
-            if (self.sp < 1) return error.StackUnderflow;
-            const a = self.stack[self.sp - 1];
-            self.sp -= 1;
-            const b = self.stack[self.sp - 1];
-            self.sp -= 1;
-            self.rmath = b / a;
-        },
-        .set => {
-            self.pc += 1;
-            const reg_lit = self.program.items[self.pc];
-            self.pc += 1;
-
-            const reg = self.u8_to_reg_pointer(reg_lit);
-            const value = self.program.items[self.pc];
-
-            reg.* = value;
-        },
-        .mov => {
-            self.pc += 1;
-            const src = self.program.items[self.pc];
-            self.pc += 1;
-            const dest = self.program.items[self.pc];
-
-            const src_r = self.u8_to_reg_value(src);
-            const dest_r = self.u8_to_reg_pointer(dest);
-
-            dest_r.* = src_r;
-        },
-        .syscall => {
-            var writer = Syscall(0, &.{
-                self.gpr[1],
-                self.gpr[2],
-                self.gpr[3],
-            }, 3, write);
-
-            switch (self.gpr[0]) {
-                0x0 => try writer.execute(writer, self),
-                else => @panic("Invalid syscall #"),
-            }
-        },
-        .goto => {
-            self.pc += 1;
-            const addr = self.program.items[self.pc];
-            self.pc = addr - 1;
-        },
-        else => {
-            try wemVM.err("Unhandled inst: {any} (0x{X})\n", .{
-                u8_to_inst(self.program.items[self.pc]),
-                self.program.items[self.pc],
-            });
+        else => |t| {
+            try wemVM.err("Found `{any}`, expected instruction, label_definition, label_reference\n", .{t});
             return false;
         },
     }
@@ -268,8 +291,6 @@ pub fn step(self: *Self) !bool {
 /// Runs the machine.
 pub fn run(self: *Self) !void {
     while (try self.step()) {}
-    self.sp = 0;
-    self.pc = 0;
 }
 
 /// Converts a register's byte representation to its name.
